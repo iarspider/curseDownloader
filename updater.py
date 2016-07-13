@@ -1,9 +1,8 @@
 import argparse
-import json
+import copy
+import simplejson as json
 from pathlib import Path
 import re
-from tkinter import Tk
-import tkinter
 
 import requests
 
@@ -14,79 +13,6 @@ parser = argparse.ArgumentParser(description="Update Curse modpack manifest")
 parser.add_argument("--manifest", help="manifest.json file from unzipped pack")
 parser.add_argument("--nogui", dest="gui", action="store_false", help="Do not use gui to to select manifest")
 args, unknown = parser.parse_known_args()
-
-
-class UpdateChooseGui():
-    optionChosen = -1
-    optionValues = {}
-
-    def __init__(self):
-        self.choose_gui = None
-        self.choose_listbox = None
-
-    def get_option(self, choices):
-        self.choose_gui = Tk()
-        self.choose_gui.title("Choose file to use")
-        self.choose_gui.minsize(500, 200)
-        self.center(self.choose_gui)
-        choose_gui_frame = tkinter.Frame(self.choose_gui)
-        choose_gui_frame.pack(fill=tkinter.BOTH, expand=True)
-        self.choose_listbox = tkinter.Listbox(choose_gui_frame)
-        i = 0
-        for choice in choices:
-            self.choose_listbox.insert(i, choice["text"])
-            self.optionValues[i] = choice["value"]
-            i += 1
-        self.choose_listbox.pack(side=tkinter.TOP, fill=tkinter.BOTH, expand=True)
-
-        choose_button = tkinter.Button(choose_gui_frame, text="Use version", command=self.set_option)
-        choose_button.pack(side=tkinter.BOTTOM, fill=tkinter.X)
-
-        self.choose_gui.mainloop()
-
-        if self.optionChosen > -1:
-            return self.optionValues[self.optionChosen]
-        else:
-            return -1
-
-    def set_option(self):
-        self.optionChosen = self.choose_listbox.curselection()[0]
-        self.choose_gui.quit()
-
-    def center(self, toplevel):
-        toplevel.update_idletasks()
-        w = toplevel.winfo_screenwidth()
-        h = toplevel.winfo_screenheight()
-        size = tuple(int(_) for _ in toplevel.geometry().split('+')[0].split('x'))
-        x = w/2 - size[0]/2
-        y = h/2 - size[1]/2
-        # noinspection PyStringFormat
-        toplevel.geometry("%dx%d+%d+%d" % (size + (x, y)))
-
-
-class UpdateChooseCli():
-    optionChosen = -1
-    optionValues = {}
-    def get_option(self, choices):
-
-        i = 0
-        for choice in choices:
-            print("%d) %s" % (i+1, choice["text"]))
-            self.optionValues[i] = choice["value"]
-            i += 1
-
-        while self.optionChosen is -1:
-            try:
-                test_val = int(input("Choose file to use: "))
-                if test_val in self.optionValues:
-                    self.optionChosen = test_val
-            except ValueError:
-                pass
-
-        if self.optionChosen > -1:
-            return self.optionValues[self.optionChosen]
-        else:
-            return -1
 
 
 def parseManifest(manifest):
@@ -101,8 +27,18 @@ def parseManifest(manifest):
 
 def getNameForNumericalId(session, numericalid):
     project_response = session.get("http://minecraft.curseforge.com/mc-mods/%s" % (numericalid), stream=True)
-    name_id_parts = re.split("\d+-([^/]*)", project_response.url, 1)
-    return name_id_parts[-2]
+    url = project_response.url
+    # name_id_parts = re.split("\d+-([^/]*)", url, 1)
+    # try:
+    #     result = name_id_parts[-2]
+    # except IndexError:
+    #     result = None
+
+    # if result is None:
+    url.rstrip('/')
+    result = url.rsplit('/', 1)[1]
+
+    return result
 
 
 def getFilesForVersion(session, mcversion, modid, modname):
@@ -120,7 +56,7 @@ def getFilesForVersion(session, mcversion, modid, modname):
 def get_newer_files(file_list, target_file):
     newer_files = []
     for test_file in file_list:
-        if test_file["id"] is not target_file:
+        if test_file["id"] != target_file:
             newer_files += [test_file]
         else:
             break
@@ -177,15 +113,78 @@ def is_up_to_date(file_id, file_type, file_list, ignore_less_stable=True):
     return False
 
 
-sess = requests.session()
-# v = getNameForNumericalId(sess, 67133)
-fs = getFilesForVersion(sess, "1.7.10", 67133, "veinminer")
-ffs = get_filtered_files(fs)
-gui = None
-print(args)
-if args.gui:
-    gui = UpdateChooseGui()
-else:
-    gui = UpdateChooseCli()
-x = gui.get_option(get_selectable_options(ffs))
-print(x)
+def get_file_version(file_id, file_list):
+    for test_file in file_list:
+        if test_file['id'] == file_id:
+            return test_file['name']
+
+    return "N/A"
+
+def main():
+    sess = requests.session()
+    manifest = parseManifest(r"e:\Games\allTheMods 1.10.2\manifest.json")
+    newManifest = copy.copy(manifest)
+
+    for i, mod in enumerate(manifest["files"]):
+        print("Project %d" % mod['projectID'])
+        try:
+            v = getNameForNumericalId(sess, mod['projectID'])
+        except IndexError as e:
+            print("Failed to get name for id %s" % (mod['projectID']))
+            continue
+
+        print("* Project name is %s" % v)
+        try:
+            fs = getFilesForVersion(sess, "1.10.2", mod['projectID'], v)
+        except KeyError:
+            print("! Failed to get files for MC 1.10.2")
+            continue
+
+        if len(fs) < 1:
+            print("? No files for 1.10.2 found, checking 1.10.1")
+            try:
+                fs = getFilesForVersion(sess, "1.10.1", mod['projectID'], v)
+            except KeyError:
+                print("! Failed to get files for MC 1.10.1")
+                continue
+
+        if len(fs) < 1:
+            print("? No files for 1.10.1 found, checking 1.10 - this may cause problems...")
+            try:
+                fs = getFilesForVersion(sess, "1.10", mod['projectID'], v)
+            except KeyError:
+                print("! Failed to get files for MC 1.10")
+                continue
+
+        if len(fs) < 1:
+            print("? No files for 1.10 found, checking 1.9.4 - this may cause problems!")
+            try:
+                fs = getFilesForVersion(sess, "1.9.4", mod['projectID'], v)
+            except KeyError:
+                print("! Failed to get files for MC 1.9.4")
+                continue
+
+        if len(fs) < 1:
+            print("? No files found for this mod")
+            continue
+
+        print("* Current file version is %s" % get_file_version(mod['fileID'], fs))
+        # print("** Filtered files:")
+        # for ff in get_filtered_files(fs):
+        #     print("** %s" % ff)
+        ffs = get_newer_files(get_filtered_files(fs), mod['fileID'])
+        # print("** Possible new IDs: ")
+        # for opt in get_selectable_options(ffs):
+        #     print ("** %s" % opt)
+        if len(ffs) < 1:
+            print("* Project already up-to-date")
+            continue
+        x = ffs[0]['id']
+        print("* Found new version: %s" % get_file_version(x, fs))
+        newManifest["files"][i]['fileID'] = x
+
+    with open(r"e:\Games\allTheMods 1.10.2\new_manifest.json", "w") as newF:
+        newF.write(json.dumps(newManifest, indent=2 * ' '))
+
+if __name__ == '__main__':
+    main()
