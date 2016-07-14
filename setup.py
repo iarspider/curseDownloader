@@ -17,6 +17,6 @@ setup(
     install_requires=[
         'appdirs',
         'requests',
-        'tk'
+        'tk', 'simplejson'
     ]
 )
