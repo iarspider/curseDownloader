@@ -17,6 +17,6 @@ setup(
     install_requires=[
         'appdirs',
         'requests',
-        'tk', 'simplejson'
+        'tk', 'simplejson', 'win_unicode_console'
     ]
 )

@@ -58,3 +58,6 @@ target/
 # PyCharm
 .idea/
 .idea/*
+/*.json
+/*.bz2
+/*.txt
